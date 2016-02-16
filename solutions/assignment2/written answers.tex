@@ -1,0 +1,119 @@
+\documentclass[]{article}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{bm}
+\usepackage{listings}
+
+\newcommand{\derivop}[1]{% \deriv{<func>}{<var>}
+	\ensuremath{\frac{\partial}{\partial {#1}}}}
+
+\newcommand{\deriv}[2]{% \deriv{<func>}{<var>}
+	\ensuremath{\frac{\partial {#1}}{\partial {#2}}}}
+
+\newcommand{\slayer}[3]{ % scalar element of layer variable/matrix
+	\ensuremath{{#1}^{(#2)}_{#3}}}
+
+\newcommand{\vlayer}[2]{ % vector/matrix layer variable
+	\ensuremath{{#1}^{(#2)}}}
+
+\begin{document}
+Batch normalization attempts to normalize inputs along their dimensions. It is defined as follows for a given input $x$ in a batch of inputs $X$; hyper parameters $\gamma$ (scaling), $\beta$ (shifting); and producing an activation $y$:
+$$\slayer{y}{m}{i}=\gamma_i \cdot \slayer{\hat{x}}{m}{i} + \beta_i$$
+where $\slayer{y}{m}{i}$ is an activation for example $m$ in dimension $i$. The normalized input $\hat{x}$ is defined as follows:
+$$\slayer{\hat{x}}{m}{i} = \frac{(\slayer{x}{m}{i} - E[X])}{\sqrt{Var[X] + \epsilon}}$$
+$\epsilon$ is simply a small value to avoid division by zero. We need to calcuate the back propagation logic for this by calculating derivatives of the loss function $L$ with respect to $\gamma$, $\beta$, and each input. First, we can start with the more simple derivatives:
+$$\deriv{L}{\beta_i} = \sum_{k} \deriv{L}{\slayer{y}{k}{i}} \derivop{\beta_i}\left[ \gamma_i \cdot \slayer{\hat{x}}{k}{i} + \beta_i\right] = \sum_{k} \deriv{L}{\slayer{y}{k}{i}}$$
+In vectorized form, this simply sums the upstream loss gradients along input dimensions, or given an activation matrix $Y \in \mathbb{R}^{NxD}$ where $N$ is the number of examples and $D$ is the number of dimensions:
+$$\nabla_\beta L = J_{1N}\beta$$
+
+Here $J$ is the unit matrix (matrix of ones). $\gamma$ is also simple:
+
+$$\deriv{L}{\gamma_i} = \sum_{k} \deriv{L}{\slayer{y}{k}{i}} \derivop{\gamma_i}\left[ \gamma_i \cdot \slayer{\hat{x}}{k}{i} + \beta_i\right] = \sum_{k} \deriv{L}{\slayer{y}{k}{i}} \cdot \slayer{\hat{x}}{k}{i}$$
+
+In vectorized form, this is simply the sum of the elementwise multiplication of the upstream loss gradients with the normalized input:
+
+$$\nabla_\gamma L = J_{1N}(\gamma \circ \nabla_{Y}L)$$
+
+Deriving back propagations for the inputs is more complex. For a particular input in dimension $i$ of example $m$, $\slayer{x}{m}{i}$, batch normalization produces an output $\slayer{y}{m}{i}$. However, it's important to note that all the dimension $i$ inputs in the batch affect $\slayer{y}{m}{i}$. As an example, consider another example input in the batch, $\slayer{x}{l}{i}$ and assume it's extremely large or infinite. It's clear this will affect $\slayer{y}{m}{i}$ through the expected value and variance functions, probably increasing the loss. Thus we must backpropagate loss $L$ from all outputs to each input:
+
+$$\derivop{\slayer{x}{m}{i}}L = \sum_k \derivop{\slayer{x}{m}{i}}\left[\gamma_i \cdot \slayer{\hat{x}}{k}{i} + \beta_i\right]$$
+
+We can first calculate the derivatives of the expectation and variance. In these derivations, we drop the previous notation and simply use $x_i$ to denote an element in a generic vector $X$.
+First we calculate the derivative of the expectation:
+$$E[X] = \sum_{k}\frac{x_k}{n}$$
+$$\derivop{x_i}E[X] = \derivop{x_i}\frac{x_1}{n} + \derivop{x_i}\frac{x_2}{n} + ... + \derivop{x_i}\frac{x_i}{n} + ... \derivop{x_i} \frac{x_n}{n}$$
+$$= 1/n$$
+
+Now the variance:
+$$Var[X] = \sum_{k} \frac{(x_k - E[X])^2}{n}$$
+$$\derivop{x_i}Var[X] = \derivop{x_i}\left[ \frac{(x_i - E[X])^2}{n} \right] + \derivop{x_i}\left[ \sum_{j \neq i}\frac{(x_j - E[X])^2}{n} \right]$$
+$$= 2 * (x_i - E[X]) * \frac{1 - 1/n}{n} + \sum_{j \neq i}\frac{2*(x_j - E[X]) * (-1/n)}{n}$$
+$$ = 2 * (n-1)/n^2 * (x_i - E[X]) - 2/n^2 * \sum_{j \neq i} x_j - E[X]$$
+$$ = 2 \left[(n-1)/n^2 * (x_i - E[X]) - 1/n^2 * \left(\sum_{j \neq i} x_j - E[X]\right)\right]$$
+$$ = 2 \left[(n-1)/n^2 * (x_i - E[X]) - 1/n^2 * \sum_{j \neq i} x_j + 1/n^2 \sum_{j \neq i}E[X]\right]$$
+$$ = 2 \left[(n-1)/n^2 * (x_i - E[X]) - 1/n^2 * \sum_{j \neq i} x_j + (n-1)/n^2 * E[X]\right]$$
+$$ = 2 \left[x_i * (n-1)/n^2 - E[X] * (n-1)/n^2 - 1/n^2 * \sum_{j \neq i} x_j + E[X] * (n-1)/n^2\right]$$
+$$ = \frac{2}{n^2}\left[x_i * (n-1) - \sum_{j \neq i} x_j \right]$$
+$$ = \frac{2}{n^2}\sum_{k} x_i - x_k$$
+
+The last line comes about as the multiplication can be thought of as a sum of $x_i$ over $1$ to $n-1$. This matches the number of terms in the latter summation. Then note that when $k=i$ in the summation, the result is zero. So we can simply sum over all k rather than using the previous restriction of $\neq i$. 
+
+For $\derivop{x}$, we must use the quotient rule (also note the $\beta$ term can be ignored as it's not a function of $x$):
+$$\left[\frac{f(x)}{g(x)}\right]' = \frac{g(x)f'(x) - f(x)g'(x)}{[g(x)]^2}$$
+
+In this case, for a particular input example $m$ along dimension $i$, we need to calculate how the loss has changed for each activation $\slayer{y}{k}{i}$:
+$$\vlayer{f(X_i)}{k} = \slayer{x}{k}{i} - E[X_i]$$
+$$\derivop{\slayer{x}{m}{i}}\vlayer{f(X_i)}{k} = \derivop{\slayer{x}{m}{i}}\slayer{x}{k}{i} - 1/n$$
+$$\vlayer{g(X_i)}{k} = \sqrt{Var[X_i] + \epsilon}$$
+$$\derivop{\slayer{x}{m}{i}}\vlayer{g(X_i)}{k} = \frac{1}{2* \sqrt{Var[X] + \epsilon}} \cdot \frac{2}{n^2}\sum_{t} \slayer{x}{m}{i} - \slayer{x}{t}{i}$$
+$$ = \frac{1}{n^2\sqrt{Var[X_i] + \epsilon}}\sum_{t} \slayer{x}{m}{i} - \slayer{x}{t}{i}$$
+$$ = \frac{1}{n^2\sqrt{Var[X_i] + \epsilon}}(n \cdot \slayer{x}{m}{i} - \sum_{t}\slayer{x}{t}{i})$$
+$$ = \frac{1}{n^2\sqrt{Var[X_i] + \epsilon}}n(\slayer{x}{m}{i} - (\sum_{t}\slayer{x}{t}{i})/n)$$
+$$ = \frac{(\slayer{x}{m}{i} - E[X_i])}{n\sqrt{Var[X_i] + \epsilon}} = \slayer{\hat{x}}{m}{i}/n$$
+
+Note the numerator derivative differs for the $m=k$ and $m\neq k$ cases, while the denominator is identical in both.
+$$\derivop{\slayer{x}{m}{i}}L = \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \derivop{\slayer{x}{m}{i}}\left[\gamma_i \cdot \slayer{\hat{x}}{k}{i} + \beta_i\right]$$
+
+$$\derivop{\slayer{x}{m}{i}}L = \gamma_i \cdot \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \derivop{\slayer{x}{m}{i}} \slayer{\hat{x}}{k}{i} + \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \derivop{\slayer{x}{m}{i}}\beta_i = \gamma_i \cdot \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \derivop{\slayer{x}{m}{i}} \slayer{\hat{x}}{k}{i}$$
+
+(continuing with only the summand):
+$$\derivop{\slayer{x}{m}{i}} \slayer{\hat{x}}{k}{i} = \deriv{L}{\slayer{y}{k}{i}} \cdot \left[
+\frac{\sqrt{Var[X_i] + \epsilon}\cdot(\derivop{\slayer{x}{m}{i}}\slayer{x}{k}{i} - 1/n) - (\slayer{x}{k}{i} - E[\vlayer{X}{i}])\cdot \slayer{\hat{x}}{m}{i}/n}{Var[X_i] + \epsilon}\right]$$
+
+$$ = \deriv{L}{\slayer{y}{k}{i}} \cdot \left[ \frac{\derivop{\slayer{x}{m}{i}}\slayer{x}{k}{i} - 1/n}{\sqrt{Var[X_i] + \epsilon}} - \
+\frac{(\slayer{x}{k}{i} - E[\vlayer{X}{i}])\cdot \slayer{\hat{x}}{m}{i}}{n \cdot Var[X_i] + \epsilon} \right]$$
+
+$$ = \deriv{L}{\slayer{y}{k}{i}} \cdot \left[ \frac{n \cdot \derivop{\slayer{x}{m}{i}}\slayer{x}{k}{i} - 1}{n \cdot \sqrt{Var[X_i] + \epsilon}} - \frac{\slayer{\hat{x}}{k}{i} \cdot \slayer{\hat{x}}{m}{i}}{n \cdot \sqrt{Var[X_i] + \epsilon}} \right]$$
+
+$$ = \deriv{L}{\slayer{y}{k}{i}} \cdot \left[\frac{n \cdot \derivop{\slayer{x}{m}{i}}\slayer{x}{k}{i} - 1 - \slayer{\hat{x}}{k}{i} \cdot \slayer{\hat{x}}{m}{i}}{n \cdot \sqrt{Var[X_i] + \epsilon}}\right]$$
+
+(going back to the full expression):
+$$\derivop{\slayer{x}{m}{i}}L = \gamma_i \cdot \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \frac{n \cdot \derivop{\slayer{x}{m}{i}}\slayer{x}{k}{i} - 1 - \slayer{\hat{x}}{k}{i} \cdot \slayer{\hat{x}}{m}{i}}{n \cdot \sqrt{Var[X_i] + \epsilon}}$$
+
+$$= \gamma_i \cdot \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \frac{n \cdot \derivop{\slayer{x}{m}{i}}\slayer{x}{k}{i}}{n \cdot \sqrt{Var[X_i] + \epsilon}} - \
+ \gamma_i \cdot \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \frac{1}{n \cdot \sqrt{Var[X_i] + \epsilon}} - \
+  \gamma_i \cdot \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \frac{\slayer{\hat{x}}{k}{i} \cdot \slayer{\hat{x}}{m}{i}}{n \cdot \sqrt{Var[X_i] + \epsilon}}$$
+
+$$= \gamma_i \cdot \deriv{L}{\slayer{y}{m}{i}} \cdot \frac{1}{\sqrt{Var[X_i] + \epsilon}} - \
+\gamma_i \cdot \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \frac{1}{n \cdot \sqrt{Var[X_i] + \epsilon}} - \
+\gamma_i \cdot \sum_k \deriv{L}{\slayer{y}{k}{i}} \cdot \frac{\slayer{\hat{x}}{k}{i} \cdot \slayer{\hat{x}}{m}{i}}{n \cdot \sqrt{Var[X_i] + \epsilon}}$$
+
+$$ = \gamma_i \cdot \left[ \deriv{L}{\slayer{y}{m}{i}} \cdot \frac{1}{\sqrt{Var[X_i] + \epsilon}} - \
+ \sum_{k}\deriv{L}{\slayer{y}{k}{i}} \cdot \frac{\slayer{\hat{x}}{k}{i} \cdot \slayer{\hat{x}}{m}{i}+1}{n \sqrt{Var[X_i] + \epsilon}}\right]$$
+
+$$ = \gamma_i \frac{1}{\sqrt{Var[X_i] + \epsilon}} \left[ \deriv{L}{\slayer{y}{m}{i}} - \
+\frac{1}{n} \sum_{k}\deriv{L}{\slayer{y}{k}{i}} \cdot \left(\slayer{\hat{x}}{k}{i} \cdot \slayer{\hat{x}}{m}{i}+1 \right)\right]$$
+
+$$ = \gamma_i \frac{1}{\sqrt{Var[X_i] + \epsilon}} \left[ \deriv{L}{\slayer{y}{m}{i}} - \
+\frac{1}{n} \sum_{k}\deriv{L}{\slayer{y}{k}{i}} \cdot \slayer{\hat{x}}{k}{i} \cdot \slayer{\hat{x}}{m}{i} - \
+\frac{1}{n} \sum_{k}\deriv{L}{\slayer{y}{k}{i}} \right]$$
+
+$$ = \gamma_i \frac{1}{\sqrt{Var[X_i] + \epsilon}} \left[ \deriv{L}{\slayer{y}{m}{i}} - \
+\frac{\slayer{\hat{x}}{m}{i}}{n} \sum_{k}\deriv{L}{\slayer{y}{k}{i}} \cdot \slayer{\hat{x}}{k}{i} - \
+\frac{1}{n} \sum_{k}\deriv{L}{\slayer{y}{k}{i}} \right]$$
+
+\end{document}
+
