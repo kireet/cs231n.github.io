@@ -5,49 +5,50 @@ from cs231n.gradient_check import eval_numerical_gradient_array, eval_numerical_
 from cs231n.layers import *
 from cs231n.fast_layers import *
 from cs231n.solver import Solver
+from cs231n.classifiers.convnet import *
 
+# def rel_error(x, y):
+#   """ returns relative error """
+#   return np.max(np.abs(x - y) / (np.maximum(1e-8, np.abs(x) + np.abs(y))))
+#
+# np.random.seed(0)
+#
+# N = 50
+# X = np.random.randn(N, 3, 8, 8)
+# y = np.random.randint(10, size=N)
+#
+# input_dim = (X.shape[1], X.shape[2], X.shape[3])
+#
+# model = ConvNet(num_filters=2, input_dim=input_dim, filter_size=5, hidden_dim=10, use_batchnorm=True, gradcheck=True)
+#
+# #model = ThreeLayerConvNet(num_filters=2, input_dim=input_dim, filter_size=5, hidden_dim=10)
+#
+# loss, grads = model.loss(X, y)
+# print 'Initial loss (no regularization): ', loss
+#
+# for name in sorted(grads):
+#   f = lambda _: model.loss(X, y)[0]
+#   grad_num = eval_numerical_gradient(f, model.params[name], verbose=False, h=1e-5)
+#   print '%s relative error: %.2e' % (name, rel_error(grad_num, grads[name]))
 
-def rel_error(x, y):
-  """ returns relative error """
-  return np.max(np.abs(x - y) / (np.maximum(1e-8, np.abs(x) + np.abs(y))))
+data = get_CIFAR10_data()
+#for k, v in data.iteritems():
+#  print '%s: ' % k, v.shape
 
-#number of inputs
-#N = 4
-N = 4
+model = ConvNet(weight_scale=0.001, hidden_dim=500, reg=0)
 
-#number of channels (input depth)
-#C = 3
-C = 3
+print
 
-#number of filters (output depth)
-#F = 2
-F = 2
+solver = Solver(model, data,
+                num_epochs=10, batch_size=50,
+                update_rule='adam',
+                optim_config={
+                  'learning_rate': 5e-3,
+                },
+                verbose=True, print_every=100)
 
-H,W = 5,5
-HH,WW = 3,3
-x = np.random.randn(N, C, H, W)
-w = np.random.randn(F, C, HH, WW)
-b = np.random.randn(F,)
+describe_solver(solver)
 
-pad = 1
-stride = 2
-conv_param = {'stride': stride, 'pad': pad}
+print
 
-H_out = 1 + (H + 2 * pad - HH) / stride
-W_out = 1 + (W + 2 * pad - WW) / stride
-
-print 'output size: (%d,%d)' % (H_out, W_out)
-dout = np.random.randn(N, F, H_out, W_out)
-
-dx_num = eval_numerical_gradient_array(lambda x: conv_forward_naive(x, w, b, conv_param)[0], x, dout)
-dw_num = eval_numerical_gradient_array(lambda w: conv_forward_naive(x, w, b, conv_param)[0], w, dout)
-db_num = eval_numerical_gradient_array(lambda b: conv_forward_naive(x, w, b, conv_param)[0], b, dout)
-
-out, cache = conv_forward_naive(x, w, b, conv_param)
-dx, dw, db = conv_backward_naive(dout, cache)
-
-# Your errors should be around 1e-9'
-print 'Testing conv_backward_naive function'
-print 'dx error: ', rel_error(dx, dx_num)
-print 'dw error: ', rel_error(dw, dw_num)
-print 'db error: ', rel_error(db, db_num)
+solver.train()

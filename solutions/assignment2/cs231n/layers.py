@@ -210,11 +210,6 @@ def batchnorm_forward(x, gamma, beta, bn_param):
 
 
 
-#
-# The derivations are wrong! The issue is that my logic only backprop'd the error for a single output back to a single
-# input. Really all outputs are affected by all inputs, and every output error must be backprop'd to each input. Think
-# of only using the average function, if a single x_i value is really high, it affects ALL output values since the
-# average is used for all outputs (y_1 ... y_k), not just y_i.
 def batchnorm_backward(dout, cache):
   """
   Backward pass for batch normalization.
@@ -478,10 +473,10 @@ def conv_forward_naive(x, w, b, conv_param):
   for n in xrange(N):
       input_data = x[n]
       for f in xrange(F):
-        for xpos in xrange(0, H - HH + 1, stride): #convolve across height and width
-          for ypos in xrange(0, W - WW + 1, stride):
+        for xpos in xrange(0, W - WW + 1, stride): #convolve across height and width
+          for ypos in xrange(0, H - HH + 1, stride):
             #print 'convolving at (%d,%d) - depth %d' % (xpos,ypos, f)
-            out[n, f, xpos/stride, ypos/stride] = np.sum(input_data[:, xpos:xpos+HH, ypos:ypos+WW] * w[f]) + b[f]
+            out[n, f, ypos/stride, xpos/stride] = np.sum(input_data[:, ypos:ypos+HH, xpos:xpos+WW] * w[f]) + b[f]
 
   #############################################################################
   #                             END OF YOUR CODE                              #
@@ -517,25 +512,40 @@ def conv_backward_naive(dout, cache):
   dw = np.zeros_like(w)
   db = np.sum(dout, axis=(0,2,3))
 
-  #if you work out the math, these are the right dimensions. they also make sense: this size outputs the correct size,
-  #i.e. the filter weights dimensions.
-  dw_filter_h = H - HH + 1
-  dw_filter_w = W - WW + 1
   for n in xrange(N):
-      input_data = x[n]
-      for f in xrange(F):
-        dout_filter = np.zeros((dw_filter_h, dw_filter_w))
-        #the interior padding of the dout filter here accounts for the stride, this can be seen by working through a one
-        #dimensional example
-        for h in xrange(0, dout_filter.shape[0], stride):
-          for w in xrange(0, dout_filter.shape[1], stride):
-            dout_filter[h, w] = dout[n, f, h/stride, w/stride]
+    input_data = x[n]
+    for f in xrange(F):
+      #if you work out the math, these are the right dimensions. they also make sense: this size outputs the correct size,
+      #i.e. the filter weights dimensions.
+      dw_padded_w = W - WW + 1
+      dw_padded_h = H - HH + 1
+      dout_padded = np.zeros((dw_padded_h, dw_padded_w))
+      #the interior padding of the dout filter here accounts for the stride, this can be seen by working through a one
+      #dimensional example
+      for width in xrange(0, dout_padded.shape[1], stride):
+        for height in xrange(0, dout_padded.shape[0], stride):
+          dout_padded[height, width] = dout[n, f, height/stride, width/stride]
 
-        for xpos in xrange(0, W - dout_filter.shape[0] + 1):
-          for ypos in xrange(0, H - dout_filter.shape[1] + 1):
-            input_area = input_data[:, xpos:xpos+dw_filter_h, ypos:ypos+dw_filter_w]
-            print 'convolving at (%d,%d) -- shape %s' % (xpos,ypos, str(input_area.shape))
-            dw[f,:, xpos, ypos] += np.sum(input_area * dout_filter, axis=(1,2))
+      for xpos in xrange(0, W - dout_padded.shape[0] + 1):
+        for ypos in xrange(0, H - dout_padded.shape[1] + 1):
+          input_area = input_data[:, ypos:ypos+dw_padded_h, xpos:xpos+dw_padded_h]
+          #print 'convolving at (%d,%d) -- shape %s' % (xpos,ypos, str(input_area.shape))
+          dw[f,:, ypos, xpos] += np.sum(input_area * dout_padded, axis=(1,2))
+
+      pad_w = WW-1 - pad
+      pad_h = HH-1 - pad
+      if pad_w > 0 or pad_h > 0:
+        dout_padded = np.pad(dout_padded, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
+
+      flipped_w = w[f, :, ::-1, ::-1]
+      for xpos in xrange(0, dout_padded.shape[1] - WW + 1):
+        for ypos in xrange(0, dout_padded.shape[0] - HH + 1):
+          input_area = dout_padded[ypos:ypos+HH, xpos:xpos+WW]
+          output = np.sum(input_area * flipped_w, axis=(1,2))
+
+          #print 'convolving at (%d,%d) -- output shape %s' % (xpos,ypos, str(output.shape))
+
+          dx[n,:, ypos, xpos] += output
 
   #############################################################################
   #                             END OF YOUR CODE                              #
@@ -562,7 +572,18 @@ def max_pool_forward_naive(x, pool_param):
   #############################################################################
   # TODO: Implement the max pooling forward pass                              #
   #############################################################################
-  pass
+  stride = pool_param['stride']
+  pool_height = pool_param['pool_height']
+  pool_width = pool_param['pool_width']
+  N, C, H, W = x.shape
+  W_out = (W-pool_width)/stride + 1
+  H_out = (H-pool_height)/stride + 1
+
+  out = np.zeros((N, C, H_out, W_out))
+  for n in xrange(0, N):
+    for xpos in xrange(0, W, stride):
+      for ypos in xrange(0, H, stride):
+        out[n, :, ypos/stride, xpos/stride] = np.max(x[n, :, ypos:ypos+pool_height, xpos:xpos+pool_width], axis=(1,2))
   #############################################################################
   #                             END OF YOUR CODE                              #
   #############################################################################
@@ -585,7 +606,20 @@ def max_pool_backward_naive(dout, cache):
   #############################################################################
   # TODO: Implement the max pooling backward pass                             #
   #############################################################################
-  pass
+  x, pool_param = cache
+  N, C, H, W = x.shape
+  stride = pool_param['stride']
+  pool_height = pool_param['pool_height']
+  pool_width = pool_param['pool_width']
+
+  dx = np.zeros_like(x)
+  for n in xrange(0, N):
+    for xpos in xrange(0, W, stride):
+      for ypos in xrange(0, H, stride):
+        for c in xrange(0, C): #there has to be a better way...
+          area = x[n, c, ypos:ypos+pool_height, xpos:xpos+pool_width]
+          h,w = np.unravel_index(np.argmax(area), area.shape)
+          dx[n,c,h+ypos,w+xpos] += dout[n,c,ypos/stride,xpos/stride]
   #############################################################################
   #                             END OF YOUR CODE                              #
   #############################################################################
@@ -623,7 +657,14 @@ def spatial_batchnorm_forward(x, gamma, beta, bn_param):
   # version of batch normalization defined above. Your implementation should  #
   # be very short; ours is less than five lines.                              #
   #############################################################################
-  pass
+  cache = []
+  out = np.zeros_like(x)
+  N, C, H, W = x.shape
+  for c in xrange(C):
+    bn_in = x[:,c,:,:].reshape(N, -1)
+    bn_out, bn_cache = batchnorm_forward(bn_in, gamma[c], beta[c], bn_param)
+    out[:,c,:,:] = bn_out.reshape(N, H, W)
+    cache.append(bn_cache)
   #############################################################################
   #                             END OF YOUR CODE                              #
   #############################################################################
@@ -653,7 +694,16 @@ def spatial_batchnorm_backward(dout, cache):
   # version of batch normalization defined above. Your implementation should  #
   # be very short; ours is less than five lines.                              #
   #############################################################################
-  pass
+  N, C, H, W = dout.shape
+  dgamma = np.zeros(C)
+  dbeta = np.zeros(C)
+  dx = np.zeros_like(dout)
+  for c in xrange(C):
+    bn_dout = dout[:,c,:,:].reshape(N,-1)
+    bn_dx, dg, db = batchnorm_backward_alt(bn_dout, cache[c])
+    dgamma[c] = np.sum(dg)
+    dbeta[c] = np.sum(db)
+    dx[:,c,:,:] = bn_dx.reshape(N, H, W)
   #############################################################################
   #                             END OF YOUR CODE                              #
   #############################################################################
